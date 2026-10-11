@@ -96,7 +96,7 @@ def test_imageio_bundled_native_encode_decode_metadata(tmp_path):
     peoff = struct.unpack_from('<I', raw, 0x3C)[0]
     assert raw[peoff:peoff+4] == b'PE\0\0'
     assert struct.unpack_from('<H', raw, peoff+4)[0] == 0xAA64
-    assert ff.get_ffmpeg_version().startswith('7.1')
+    assert ff.get_ffmpeg_version() == 'n7.1'  # exact upstream Git tag build
     oracle = frames()
     output = tmp_path / 'lossless.mkv'
     writer = ff.write_frames(str(output), (64, 48), fps=12, codec='ffv1', pix_fmt_in='rgb24', pix_fmt_out='bgr0', macro_block_size=1)

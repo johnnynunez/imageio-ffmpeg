@@ -4,6 +4,7 @@ on:
     branches: [ci/native-winarm64-cp312-video-20261011]
 permissions:
   contents: read
+  actions: read
 jobs:
   native:
     runs-on: windows-11-arm
@@ -39,50 +40,19 @@ jobs:
           python -c "import sys,sysconfig; assert sys.version_info[:2] == (3,12); assert sysconfig.get_platform() == 'win-arm64'"
           python -m pip install build setuptools wheel numpy==2.3.2 pytest delvewheel cmake==4.2.0
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
-      - uses: actions/checkout@v4
+      - name: Download exact wheel from completed native build
+        uses: actions/download-artifact@v4
         with:
-          repository: FFmpeg/FFmpeg
-          ref: b08d7969c550a804a59511c7b83f2dd8cc0499b8
-          path: ffmpeg
-          fetch-depth: 0
-      - uses: msys2/setup-msys2@v2
-        with:
-          msystem: MSYS
-          update: false
-          cache: false
-          path-type: inherit
-          install: make diffutils pkgconf
-      - uses: ilammy/msvc-dev-cmd@v1
-        with:
-          arch: arm64
-      - name: Verify FFmpeg pin and CPU-only profile
+          name: imageio-ffmpeg-winarm64-cp312-evidence
+          repository: johnnynunez/imageio-ffmpeg
+          run-id: 38183445632
+          github-token: ${{ github.token }}
+          path: ${{ env.STAGE }}
+      - name: Verify reused native build artifact
         run: |
-          if ((git -C ffmpeg rev-parse HEAD) -ne 'b08d7969c550a804a59511c7b83f2dd8cc0499b8') { throw 'FFmpeg SHA mismatch' }
-          git -C ffmpeg archive --format=tar.gz --output="$env:STAGE/ffmpeg-n7.1-source.tar.gz" HEAD
-          Copy-Item ffmpeg/COPYING* $env:STAGE
-          python source/.ci-native/test_platform.py
-          if ($LASTEXITCODE) { exit $LASTEXITCODE }
-      - name: Compile native FFmpeg 7.1 without changing its pin
-        shell: msys2 {0}
-        run: |
-          set -euo pipefail
-          cd ffmpeg
-          ./configure --toolchain=msvc --arch=aarch64 --target-os=win64 --disable-asm --disable-doc --disable-debug --disable-autodetect --disable-network --disable-shared --enable-static --disable-ffplay
-          make -j4
-          ./ffmpeg.exe -version
-      - name: Package native executable and license provenance
-        run: |
-          Copy-Item ffmpeg/ffmpeg.exe source/imageio_ffmpeg/binaries/ffmpeg-win-aarch64-v7.1.exe
-          Copy-Item ffmpeg/COPYING* source/imageio_ffmpeg/binaries/
-          Copy-Item ffmpeg/ffbuild/config.log "$env:STAGE/ffmpeg-config.log"
-          Copy-Item ffmpeg/ffbuild/config.mak "$env:STAGE/ffmpeg-config.mak"
-          & ffmpeg/ffmpeg.exe -buildconf 2>&1 | Out-File "$env:STAGE/ffmpeg-buildconf.txt"
-          & ffmpeg/ffmpeg.exe -encoders 2>&1 | Out-File "$env:STAGE/ffmpeg-encoders.txt"
-          'Experimental upstream 7.1 CPU codec build; no external libx264, no NVENC/NVDEC. Full existing wheel codec parity is NOT claimed. Source archive and COPYING files accompany the artifact.' | Out-File "$env:STAGE/feature-gaps.txt"
-          Push-Location source
-          python setup.py bdist_wheel --plat-name win_arm64 --dist-dir "$env:STAGE/wheels"
-          if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          Pop-Location
+          $wheel = (Get-ChildItem "$env:STAGE/wheels/*.whl").FullName
+          if ((Get-FileHash $wheel -Algorithm SHA256).Hash.ToLower() -ne '3384050aa8fbb2f8a10a6826b631d4b7cea7beea3c27ad2e8a24ffc6fbd3ffc1') { throw 'Reused wheel hash mismatch' }
+          'Native build run 38183445632 / wrapper 593757399fb27f8a3c7fd8035ca13ab539e538e1 / source 852dff761c65517e7cb24c380391ea39cf2d27bf; only the test version oracle changes to the exact upstream n7.1 Git spelling.' | Out-File "$env:STAGE/reused-build.txt"
       - name: Audit wheel hashes RECORD and PE
         id: audit
         run: |
