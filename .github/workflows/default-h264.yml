@@ -1,0 +1,46 @@
+name: Default H264 source acceptance - no binary publication
+on:
+  push:
+    branches: [ci/video-default-h264-20261012]
+permissions:
+  contents: read
+  actions: read
+jobs:
+  baseline:
+    runs-on: windows-11-arm
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          architecture: arm64
+      - uses: actions/download-artifact@v4
+        with:
+          name: imageio-ffmpeg-winarm64-cp312-evidence
+          repository: johnnynunez/imageio-ffmpeg
+          run-id: 38183445632
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/old
+      - name: Real default API against unchanged original wheel
+        shell: pwsh
+        run: |
+          $wheel = (Get-ChildItem "$env:RUNNER_TEMP/old/wheels/*.whl").FullName
+          if ((Get-FileHash $wheel -Algorithm SHA256).Hash.ToLower() -ne '3384050aa8fbb2f8a10a6826b631d4b7cea7beea3c27ad2e8a24ffc6fbd3ffc1') { throw 'wrong wheel' }
+          python -m venv "$env:RUNNER_TEMP/test-env"
+          $py = "$env:RUNNER_TEMP/test-env/Scripts/python.exe"
+          & $py -m pip install pytest==9.1.1 numpy==2.3.2 $wheel
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          New-Item -ItemType Directory -Force "$env:RUNNER_TEMP/results" | Out-Null
+          Copy-Item .ci-native/test_default_h264.py "$env:RUNNER_TEMP/results/"
+          Set-Location "$env:RUNNER_TEMP/results"
+          & $py -m pytest test_default_h264.py -v -s --junitxml=baseline.xml
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - name: Upload test report only - no wheel or executable
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: default-h264-baseline-report
+          path: ${{ runner.temp }}/results/*.xml
+          if-no-files-found: error
+          retention-days: 14
