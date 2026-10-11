@@ -17,7 +17,7 @@ def test_default_h264(tmp_path):
     assert sysconfig.get_platform() == 'win-arm64'
     exe = Path(ff.get_ffmpeg_exe())
     b = exe.read_bytes()
-    assert struct.unpack_from('<H', b, struct.unpack_from('<I', b, 0x3C)[0] + 4)[0] == 0xAA64
+    assert struct.unpack_from('<H', b, struct.unpack_from('<I', b, 0x3C)[0] + 4)[0] == int(os.environ.get('EXPECTED_PE_MACHINE', '0xaa64'), 16)
     print('EXECUTABLE', exe, hashlib.sha256(b).hexdigest(), flush=True)
     print(subprocess.check_output([str(exe), '-version'], text=True), flush=True)
     colors = [(20, 40, 180), (80, 140, 20), (180, 40, 50), (220, 180, 30)]

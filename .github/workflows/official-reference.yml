@@ -1,0 +1,49 @@
+name: Official imageio FFmpeg 7.1 AMD64 reference - reports only
+on:
+  push:
+    branches: [ci/video-official-reference-20261012]
+permissions:
+  contents: read
+jobs:
+  reference:
+    runs-on: windows-11-arm
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          architecture: arm64
+      - name: Official executable feature surface and real API default
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force "$env:RUNNER_TEMP/reference", "$env:RUNNER_TEMP/reports" | Out-Null
+          $wheel = "$env:RUNNER_TEMP/reference/imageio_ffmpeg-0.6.0-py3-none-win_amd64.whl"
+          Invoke-WebRequest https://files.pythonhosted.org/packages/2c/c6/fa760e12a2483469e2bf5058c5faff664acf66cadb4df2ad6205b016a73d/imageio_ffmpeg-0.6.0-py3-none-win_amd64.whl -OutFile $wheel
+          if ((Get-FileHash $wheel -Algorithm SHA256).Hash.ToLower() -ne '02fa47c83703c37df6bfe4896aab339013f62bf02c5ebf2dce6da56af04ffc0a') { throw 'official wheel hash mismatch' }
+          python -m zipfile -e $wheel "$env:RUNNER_TEMP/reference/unpacked"
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          python -m venv "$env:RUNNER_TEMP/test-env"
+          $py = "$env:RUNNER_TEMP/test-env/Scripts/python.exe"
+          & $py -m pip install pytest==9.1.1 numpy==2.3.2
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          $env:PYTHONPATH = "$env:RUNNER_TEMP/reference/unpacked"
+          $env:IMAGEIO_FFMPEG_EXE = "$env:RUNNER_TEMP/reference/unpacked/imageio_ffmpeg/binaries/ffmpeg-win-x86_64-v7.1.exe"
+          $env:EXPECTED_PE_MACHINE = '0x8664'
+          foreach ($cap in @('version','buildconf','encoders','decoders','protocols','filters')) {
+            & $env:IMAGEIO_FFMPEG_EXE "-$cap" 2>&1 | Out-File "$env:RUNNER_TEMP/reports/$cap.txt"
+            if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          }
+          Get-FileHash $env:IMAGEIO_FFMPEG_EXE -Algorithm SHA256 | ConvertTo-Json | Out-File "$env:RUNNER_TEMP/reports/executable-hash.json"
+          'Official win_amd64 wheel 0.6.0 SHA256 02fa47c83703c37df6bfe4896aab339013f62bf02c5ebf2dce6da56af04ffc0a. AMD64 executable under Windows ARM64 emulation: reference ONLY, not native ARM64 acceptance.' | Out-File "$env:RUNNER_TEMP/reports/BOUNDARIES.txt"
+          Copy-Item .ci-native/test_default_h264.py "$env:RUNNER_TEMP/reports/"
+          Set-Location "$env:RUNNER_TEMP/reports"
+          & $py -m pytest test_default_h264.py -v -s --junitxml=official-default.xml
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: official-reference-reports-only
+          path: ${{ runner.temp }}/reports
+          if-no-files-found: error
+          retention-days: 14
