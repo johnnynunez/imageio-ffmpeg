@@ -1,0 +1,114 @@
+name: Native Windows ARM64 CP312 CPU verification
+on:
+  push:
+    branches: [ci/native-winarm64-cp312-video-20261011]
+permissions:
+  contents: read
+jobs:
+  native:
+    runs-on: windows-11-arm
+    timeout-minutes: 50
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      TEST_PACKAGE: imageio-ffmpeg
+      TEST_VERSION: 0.6.0
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: harness
+      - uses: actions/checkout@v4
+        with:
+          repository: johnnynunez/imageio-ffmpeg
+          ref: 852dff761c65517e7cb24c380391ea39cf2d27bf
+          path: source
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          architecture: arm64
+      - name: Verify source and initialize isolated paths
+        run: |
+          if ((git -C source rev-parse HEAD) -ne '852dff761c65517e7cb24c380391ea39cf2d27bf') { throw 'source SHA mismatch' }
+          $stage = "$env:RUNNER_TEMP/video-evidence"
+          New-Item -ItemType Directory -Force $stage | Out-Null
+          "STAGE=$stage" >> $env:GITHUB_ENV
+          "PIP_CACHE_DIR=$env:RUNNER_TEMP/pip-cache" >> $env:GITHUB_ENV
+          git -C source submodule status --recursive | Out-File "$stage/submodules.txt"
+          python -c "import sys,sysconfig; assert sys.version_info[:2] == (3,12); assert sysconfig.get_platform() == 'win-arm64'"
+          python -m pip install build setuptools wheel numpy==2.3.2 pytest delvewheel cmake==4.2.0
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - uses: actions/checkout@v4
+        with:
+          repository: FFmpeg/FFmpeg
+          ref: b08d7969c550a804a59511c7b83f2dd8cc0499b8
+          path: ffmpeg
+          fetch-depth: 0
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: MSYS
+          update: false
+          cache: false
+          path-type: inherit
+          install: make diffutils pkgconf
+      - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: arm64
+      - name: Verify FFmpeg pin and CPU-only profile
+        run: |
+          if ((git -C ffmpeg rev-parse HEAD) -ne 'b08d7969c550a804a59511c7b83f2dd8cc0499b8') { throw 'FFmpeg SHA mismatch' }
+          git -C ffmpeg archive --format=tar.gz --output="$env:STAGE/ffmpeg-n7.1-source.tar.gz" HEAD
+          Copy-Item ffmpeg/COPYING* $env:STAGE
+          python source/.ci-native/test_platform.py
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - name: Compile native FFmpeg 7.1 without changing its pin
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          cd ffmpeg
+          ./configure --toolchain=msvc --arch=aarch64 --target-os=win64 --disable-asm --disable-doc --disable-debug --disable-autodetect --disable-network --disable-shared --enable-static --disable-ffplay
+          make -j4
+          ./ffmpeg.exe -version
+      - name: Package native executable and license provenance
+        run: |
+          Copy-Item ffmpeg/ffmpeg.exe source/imageio_ffmpeg/binaries/ffmpeg-win-aarch64-v7.1.exe
+          Copy-Item ffmpeg/COPYING* source/imageio_ffmpeg/binaries/
+          Copy-Item ffmpeg/ffbuild/config.log "$env:STAGE/ffmpeg-config.log"
+          Copy-Item ffmpeg/ffbuild/config.mak "$env:STAGE/ffmpeg-config.mak"
+          & ffmpeg/ffmpeg.exe -buildconf 2>&1 | Out-File "$env:STAGE/ffmpeg-buildconf.txt"
+          & ffmpeg/ffmpeg.exe -encoders 2>&1 | Out-File "$env:STAGE/ffmpeg-encoders.txt"
+          'Experimental upstream 7.1 CPU codec build; no external libx264, no NVENC/NVDEC. Full existing wheel codec parity is NOT claimed. Source archive and COPYING files accompany the artifact.' | Out-File "$env:STAGE/feature-gaps.txt"
+          Push-Location source
+          python setup.py bdist_wheel --plat-name win_arm64 --dist-dir "$env:STAGE/wheels"
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          Pop-Location
+      - name: Audit wheel hashes RECORD and PE
+        id: audit
+        run: |
+          $wheel = (Get-ChildItem "$env:STAGE/wheels/*.whl").FullName
+          python harness/.ci-native/audit_wheel.py $wheel "$env:STAGE/wheel-audit.json"
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - name: Fresh installed wheel CPU video tests
+        if: ${{ !cancelled() && steps.audit.outcome != 'skipped' }}
+        run: |
+          python -m venv "$env:RUNNER_TEMP/test-env"
+          $py = "$env:RUNNER_TEMP/test-env/Scripts/python.exe"
+          & $py -m pip install pytest numpy==2.3.2 (Get-ChildItem "$env:STAGE/wheels/*.whl").FullName
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          Copy-Item harness/.ci-native/test_native.py "$env:STAGE/test_native.py"
+          Set-Location $env:STAGE
+          & $py -m pytest test_native.py -v -s --junitxml=tests.xml
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - name: Preserve FFmpeg failure diagnostics
+        if: always()
+        run: |
+          if (Test-Path ffmpeg/ffbuild/config.log) { Copy-Item ffmpeg/ffbuild/config.log "$env:STAGE/ffmpeg-config.log" }
+      - name: Upload evidence only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: imageio-ffmpeg-winarm64-cp312-evidence
+          path: ${{ env.STAGE }}
+          if-no-files-found: error
+          retention-days: 14
