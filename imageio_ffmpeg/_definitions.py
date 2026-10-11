@@ -1,5 +1,6 @@
 import sys
 import platform
+import sysconfig
 
 
 __version__ = "0.6.0"
@@ -22,6 +23,8 @@ def _get_os_string():
 
 
 def _get_arch():
+    if sys.platform.startswith("win"):
+        return {"win-arm64": "aarch64", "win-amd64": "x86_64", "win32": "i686"}[sysconfig.get_platform()]
     # See e.g.: https://stackoverflow.com/questions/45124888
     is_64_bit = sys.maxsize > 2**32
     machine = platform.machine()
@@ -47,6 +50,7 @@ def _get_arch():
 
 # Platform string -> ffmpeg filename
 FNAME_PER_PLATFORM = {
+    "windows-aarch64": "ffmpeg-win-aarch64-v7.1.exe",
     "macos-aarch64": "ffmpeg-macos-aarch64-v7.1",
     "macos-x86_64": "ffmpeg-macos-x86_64-v7.1",  # 10.9+
     "windows-x86_64": "ffmpeg-win-x86_64-v7.1.exe",
