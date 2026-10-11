@@ -1,0 +1,108 @@
+name: Native FFmpeg 7.1 plus source x264 - logs only
+on:
+  push:
+    branches: [ci/video-default-h264-20261012]
+permissions:
+  contents: read
+jobs:
+  source-h264:
+    runs-on: windows-11-arm
+    timeout-minutes: 40
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: harness
+      - uses: actions/checkout@v4
+        with:
+          repository: johnnynunez/imageio-ffmpeg
+          ref: 852dff761c65517e7cb24c380391ea39cf2d27bf
+          path: source
+      - uses: actions/checkout@v4
+        with:
+          repository: FFmpeg/FFmpeg
+          ref: b08d7969c550a804a59511c7b83f2dd8cc0499b8
+          path: ffmpeg
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          architecture: arm64
+      - name: Pins source archives and isolated paths
+        run: |
+          if ((git -C ffmpeg rev-parse HEAD) -ne 'b08d7969c550a804a59511c7b83f2dd8cc0499b8') { throw 'FFmpeg source mismatch' }
+          if ((git -C source rev-parse HEAD) -ne '852dff761c65517e7cb24c380391ea39cf2d27bf') { throw 'imageio source mismatch' }
+          New-Item -ItemType Directory -Force "$env:RUNNER_TEMP/reports", x264 | Out-Null
+          "REPORTS=$env:RUNNER_TEMP/reports" >> $env:GITHUB_ENV
+          "PIP_CACHE_DIR=$env:RUNNER_TEMP/pip-cache" >> $env:GITHUB_ENV
+          Invoke-WebRequest https://code.videolan.org/videolan/x264/-/archive/b35605ace3ddf7c1a5d67a2eb553f034aef41d55/x264-b35605ace3ddf7c1a5d67a2eb553f034aef41d55.tar.bz2 -OutFile "$env:RUNNER_TEMP/x264.tar.bz2"
+          if ((Get-FileHash "$env:RUNNER_TEMP/x264.tar.bz2" -Algorithm SHA256).Hash.ToLower() -ne '6eeb82934e69fd51e043bd8c5b0d152839638d1ce7aa4eea65a3fedcf83ff224') { throw 'x264 archive mismatch' }
+          tar -xf "$env:RUNNER_TEMP/x264.tar.bz2" -C x264 --strip-components=1
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          Copy-Item x264/COPYING "$env:RUNNER_TEMP/reports/x264-COPYING"
+          Copy-Item ffmpeg/COPYING* "$env:RUNNER_TEMP/reports/"
+          Copy-Item ffmpeg/LICENSE.md "$env:RUNNER_TEMP/reports/ffmpeg-LICENSE.md"
+          python -c "import sysconfig; assert sysconfig.get_platform() == 'win-arm64'"
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: MSYS
+          update: false
+          cache: false
+          path-type: inherit
+          install: make diffutils pkgconf
+      - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: arm64
+      - name: Build pinned x264 static ARM64 from source
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          export CC=cl
+          prefix="$(cygpath -m "$RUNNER_TEMP/x264-install")"
+          cd x264
+          ./configure --host=aarch64-w64-mingw32 --prefix="$prefix" --enable-static --disable-cli --disable-asm --disable-opencl
+          make -j4
+          make install
+      - name: Build FFmpeg 7.1 default-H264 profile
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          export PKG_CONFIG_PATH="$(cygpath -u "$RUNNER_TEMP/x264-install/lib/pkgconfig")"
+          cd ffmpeg
+          ./configure --toolchain=msvc --arch=aarch64 --target-os=win64 --disable-asm --disable-doc --disable-debug --disable-autodetect --disable-network --disable-shared --enable-static --disable-ffplay --enable-gpl --enable-libx264 --pkg-config=pkgconf
+          make -j4
+          ./ffmpeg.exe -version
+      - name: Real API acceptance against native source executable
+        run: |
+          python -m venv "$env:RUNNER_TEMP/test-env"
+          $py = "$env:RUNNER_TEMP/test-env/Scripts/python.exe"
+          & $py -m pip install pytest==9.1.1 numpy==2.3.2 ./source
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          $env:IMAGEIO_FFMPEG_EXE = (Resolve-Path ffmpeg/ffmpeg.exe).Path
+          Copy-Item harness/.ci-native/test_default_h264.py "$env:REPORTS/"
+          & ffmpeg/ffmpeg.exe -buildconf 2>&1 | Out-File "$env:REPORTS/buildconf.txt"
+          & ffmpeg/ffmpeg.exe -encoders 2>&1 | Out-File "$env:REPORTS/encoders.txt"
+          & ffmpeg/ffmpeg.exe -decoders 2>&1 | Out-File "$env:REPORTS/decoders.txt"
+          & ffmpeg/ffmpeg.exe -protocols 2>&1 | Out-File "$env:REPORTS/protocols.txt"
+          & ffmpeg/ffmpeg.exe -filters 2>&1 | Out-File "$env:REPORTS/filters.txt"
+          Get-FileHash ffmpeg/ffmpeg.exe -Algorithm SHA256 | ConvertTo-Json | Out-File "$env:REPORTS/executable-hash.json"
+          Set-Location $env:REPORTS
+          & $py -m pytest test_default_h264.py -v -s --junitxml=source-default.xml
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - name: Preserve configuration evidence only
+        if: always()
+        run: |
+          if (Test-Path x264/config.log) { Copy-Item x264/config.log "$env:REPORTS/x264-config.log" }
+          if (Test-Path x264/config.mak) { Copy-Item x264/config.mak "$env:REPORTS/x264-config.mak" }
+          if (Test-Path ffmpeg/ffbuild/config.log) { Copy-Item ffmpeg/ffbuild/config.log "$env:REPORTS/ffmpeg-config.log" }
+          if (Test-Path ffmpeg/ffbuild/config.mak) { Copy-Item ffmpeg/ffbuild/config.mak "$env:REPORTS/ffmpeg-config.mak" }
+          'NO WHEEL/EXE PUBLICATION. x264 b35605ace3ddf7c1a5d67a2eb553f034aef41d55; source tar SHA256 6eeb82934e69fd51e043bd8c5b0d152839638d1ce7aa4eea65a3fedcf83ff224; FFmpeg b08d7969c550a804a59511c7b83f2dd8cc0499b8; GPL enabled. Not codec parity or legal clearance.' | Out-File "$env:REPORTS/BOUNDARIES.txt"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: native-source-h264-reports-only
+          path: ${{ env.REPORTS }}
+          if-no-files-found: error
+          retention-days: 14

@@ -1,7 +1,7 @@
 name: Default H264 source acceptance - no binary publication
 on:
   push:
-    branches: [ci/video-default-h264-20261012]
+    branches: [ci/video-default-h264-baseline-frozen-20261012]
 permissions:
   contents: read
   actions: read
