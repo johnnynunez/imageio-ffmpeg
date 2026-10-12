@@ -1,0 +1,49 @@
+EXPERIMENTAL imageio-ffmpeg 0.6.0+arm64.gpl.llvm.r3
+
+This package combines a BSD-2-Clause Python wrapper with a separately licensed
+GPL-v2-or-later FFmpeg executable and GPL-v2-or-later x264. It is not an
+upstream release. The wrapper's BSD terms do not relicense the executable.
+
+Exact inputs:
+Wrapper 852dff761c65517e7cb24c380391ea39cf2d27bf
+FFmpeg 7.1 b08d7969c550a804a59511c7b83f2dd8cc0499b8
+x264 b35605ace3ddf7c1a5d67a2eb553f034aef41d55
+LLVM-MinGW recipe 28748c4b2dbc7396f095bafd92321958c5a2db1c (20250613)
+LLVM 6146a88f60492b520a36f8f8f3231e15f3cc6082 (20.1.7)
+MinGW-w64 e06d7853b292f6f81f200169092dd41ff92bca7e
+
+This software is based in part on the work of the Independent JPEG Group.
+No additions, deletions, or modifications are made by this experiment to
+FFmpeg libavcodec/jfdctfst.c, libavcodec/jfdctint_template.c, or
+libavcodec/jrevdct.c relative to the exact FFmpeg revision above. This is
+not a claim that the FFmpeg upstream versions are identical to the original
+IJG release. The complete embedded IJG copyright, permission, no-warranty,
+liability and naming/advertising restrictions are reproduced in the
+compiled-source notice appendix. The relevant original files are in source.
+
+FFmpeg and x264 source inputs are otherwise unchanged. Their generated
+configuration, dependency, version and build files are generated outputs.
+The wrapper local version is changed from 0.6.0; the exact patch is supplied.
+The new executable and accompanying notices/provenance are added to its
+binaries directory. No other wrapper source-code change is intended.
+
+COMPILED-SOURCE-NOTICES.txt reproduces all block comments from the compiler
+reported FFmpeg/x264 source/header/template dependencies, plus full upstream
+license texts and the pinned wrapper BSD terms. It conservatively includes
+compiled inputs whose sections may subsequently be removed by the linker.
+source-attribution.json records hashes; link-map.txt records actual selection.
+This scope is not a blanket review of unbuilt FFmpeg components.
+
+LLVM-MinGW uses open-source MinGW startup/support and LLVM compiler-rt inputs.
+The UCRT is expected from the Windows operating system, not copied into this
+package. LLVM-MinGW's ISC license covers its own scripts, not all toolchain
+components. LLVM and MinGW-w64 have their own terms, including LLVM exceptions
+and source-specific permissive/public-domain terms. Replacing MSVC static
+runtime objects does not eliminate these obligations or automatically settle
+GPL compatibility or system-library interpretation. Publication remains held
+pending exact runtime-input review; this document is not legal clearance.
+
+No --enable-nonfree or GPL-classification patch. No claims of encoder/network/
+PNG parity, GPU acceleration, assembly optimization, patent freedom, fitness,
+upstream acceptance, bit-reproducibility, or full upstream-suite coverage.
+No MSVC runtime DLLs or Windows UCRT/system DLLs are redistributed.

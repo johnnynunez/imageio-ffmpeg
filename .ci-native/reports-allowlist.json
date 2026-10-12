@@ -43,6 +43,7 @@
   "source-unchanged.json",
   "system-runtime-witness.json",
   "test_bundled_r2.py",
+  "test_bundled_r3.py",
   "toolchain-LICENSE.txt",
   "toolchain-README.md",
   "toolchain-inputs.json",

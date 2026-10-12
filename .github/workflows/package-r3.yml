@@ -1,0 +1,161 @@
+name: Experimental LLVM-MinGW UCRT bundled ARM64 r3
+on:
+  push:
+    branches: [ci/imageio-package-r3-20261012]
+    paths: ['.github/workflows/package-r3.yml', '.ci-native/*r3*']
+permissions:
+  contents: read
+env:
+  PYTHONDONTWRITEBYTECODE: '1'
+jobs:
+  package:
+    runs-on: windows-11-arm
+    timeout-minutes: 40
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: harness
+      - uses: actions/checkout@v4
+        with:
+          repository: johnnynunez/imageio-ffmpeg
+          ref: 852dff761c65517e7cb24c380391ea39cf2d27bf
+          path: source
+          fetch-depth: 0
+      - uses: actions/checkout@v4
+        with:
+          repository: FFmpeg/FFmpeg
+          ref: b08d7969c550a804a59511c7b83f2dd8cc0499b8
+          path: ffmpeg
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          architecture: arm64
+      - name: Verify immutable sources and setup isolated paths
+        run: |
+          if ((git -C ffmpeg rev-parse HEAD) -ne 'b08d7969c550a804a59511c7b83f2dd8cc0499b8') { throw 'FFmpeg SHA' }
+          if ((git -C source rev-parse HEAD) -ne '852dff761c65517e7cb24c380391ea39cf2d27bf') { throw 'wrapper SHA' }
+          New-Item -ItemType Directory -Force "$env:RUNNER_TEMP/reports", "$env:RUNNER_TEMP/payload", "$env:RUNNER_TEMP/corresponding-source", x264 | Out-Null
+          "REPORTS=$env:RUNNER_TEMP/reports" >> $env:GITHUB_ENV
+          "PAYLOAD=$env:RUNNER_TEMP/payload" >> $env:GITHUB_ENV
+          "SOURCES=$env:RUNNER_TEMP/corresponding-source" >> $env:GITHUB_ENV
+          "PIP_CACHE_DIR=$env:RUNNER_TEMP/pip-cache" >> $env:GITHUB_ENV
+          Invoke-WebRequest https://code.videolan.org/videolan/x264/-/archive/b35605ace3ddf7c1a5d67a2eb553f034aef41d55/x264-b35605ace3ddf7c1a5d67a2eb553f034aef41d55.tar.bz2 -OutFile "$env:RUNNER_TEMP/corresponding-source/x264.tar.bz2"
+          if ((Get-FileHash "$env:RUNNER_TEMP/corresponding-source/x264.tar.bz2" -Algorithm SHA256).Hash.ToLower() -ne '6eeb82934e69fd51e043bd8c5b0d152839638d1ce7aa4eea65a3fedcf83ff224') { throw 'x264 archive SHA' }
+          tar -xf "$env:RUNNER_TEMP/corresponding-source/x264.tar.bz2" -C x264 --strip-components=1
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          git -C ffmpeg archive --format=tar.gz --prefix=ffmpeg/ -o "$env:RUNNER_TEMP/corresponding-source/ffmpeg.tar.gz" HEAD
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          git -C source archive --format=tar.gz --prefix=imageio-ffmpeg/ -o "$env:RUNNER_TEMP/corresponding-source/wrapper.tar.gz" HEAD
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          git -C harness archive --format=tar.gz --prefix=build-recipe/ -o "$env:RUNNER_TEMP/corresponding-source/recipe.tar.gz" HEAD
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          python -B -c "import sysconfig; assert sysconfig.get_platform() == 'win-arm64'"
+          python -B -m pip install setuptools==80.9.0 wheel==0.45.1 pefile==2024.8.26
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: MSYS
+          update: false
+          cache: false
+          path-type: inherit
+          install: make diffutils pkgconf
+      - name: Install digest-pinned LLVM-MinGW and corresponding runtime sources
+        run: |
+          python -B harness/.ci-native/toolchain_r3.py
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - name: Build exact x264 with LLVM-MinGW UCRT
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          export PATH="$(cygpath -u "$TOOLCHAIN")/bin:$PATH"
+          export CC=aarch64-w64-mingw32-clang
+          export AR=llvm-ar
+          export RANLIB=llvm-ranlib
+          unset CFLAGS CXXFLAGS LIB INCLUDE LIBPATH || true
+          prefix="$(cygpath -m "$RUNNER_TEMP/x264-install")"
+          cd x264
+          ./configure --host=aarch64-w64-mingw32 --prefix="$prefix" --enable-static --disable-cli --disable-asm --disable-opencl
+          make -j4 > "$(cygpath -u "$REPORTS")/x264-build.log" 2>&1
+          make install
+      - name: Build same FFmpeg pin using new GNU Windows profile
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          export PATH="$(cygpath -u "$TOOLCHAIN")/bin:$PATH"
+          export PKG_CONFIG_PATH="$(cygpath -u "$RUNNER_TEMP/x264-install/lib/pkgconfig")"
+          unset CFLAGS CXXFLAGS LIB INCLUDE LIBPATH || true
+          cd ffmpeg
+          ./configure --cc=aarch64-w64-mingw32-clang --cxx=aarch64-w64-mingw32-clang++ --ar=llvm-ar --ranlib=llvm-ranlib --nm=llvm-nm --windres=aarch64-w64-mingw32-windres --arch=aarch64 --target-os=mingw32 --disable-asm --disable-doc --disable-debug --disable-autodetect --disable-network --disable-shared --enable-static --disable-ffplay --disable-ffprobe --enable-gpl --enable-libx264 --pkg-config=pkgconf --disable-pthreads --enable-w32threads --extra-ldflags='-Wl,-Map,ffmpeg.map,--trace'
+          make -j4 V=1 ffmpeg.exe > "$(cygpath -u "$REPORTS")/build-link.log" 2>&1
+          ./ffmpeg.exe -version
+      - name: Attribute actual compiled sources and selected link units
+        run: |
+          python -B harness/.ci-native/attribution_r3.py
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          python -B harness/.ci-native/package_r3.py prepare
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          & "$env:TOOLCHAIN/bin/llvm-readobj.exe" --file-headers --coff-imports ffmpeg/ffmpeg.exe | Out-File "$env:REPORTS/llvm-readobj.txt"
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          python -B harness/.ci-native/runtime_r3.py
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - name: Build separately locally versioned wheel
+        working-directory: source
+        run: |
+          python -B setup.py bdist_wheel --plat-name win_arm64 --dist-dir "$env:PAYLOAD"
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - name: Strict PE RECORD audit plus corrupted-wheel negative
+        run: |
+          $wheel = (Get-ChildItem "$env:PAYLOAD/*.whl").FullName
+          python -B harness/.ci-native/audit_wheel.py $wheel "$env:REPORTS/wheel-audit.json"
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          python -B harness/.ci-native/package_r3.py negative
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - name: Fresh native venv uses bundled exe with no override
+        run: |
+          Remove-Item Env:IMAGEIO_FFMPEG_EXE -ErrorAction SilentlyContinue
+          python -B -m venv "$env:RUNNER_TEMP/test-env"
+          $py = "$env:RUNNER_TEMP/test-env/Scripts/python.exe"
+          & $py -m pip install pytest==9.1.1 numpy==2.3.2 (Get-ChildItem "$env:PAYLOAD/*.whl").FullName
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          Copy-Item harness/.ci-native/test_bundled_r3.py "$env:REPORTS/test_bundled_r3.py"
+          Set-Location $env:REPORTS
+          & $py -I -B -m pytest test_bundled_r3.py -v -s --junitxml=bundled.xml
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - name: Source bundle technical and rights gates
+        id: gates
+        run: |
+          python -B harness/.ci-native/package_r3.py finalize
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - name: Preserve bounded diagnostics on failure
+        if: always()
+        run: |
+          if (Test-Path ffmpeg/ffbuild/config.log) { Copy-Item ffmpeg/ffbuild/config.log "$env:REPORTS/ffmpeg-config.log" }
+          if (Test-Path ffmpeg/ffbuild/config.mak) { Copy-Item ffmpeg/ffbuild/config.mak "$env:REPORTS/ffmpeg-config.mak" }
+          if (Test-Path x264/config.log) { Copy-Item x264/config.log "$env:REPORTS/x264-config.log" }
+          if (Test-Path x264/config.mak) { Copy-Item x264/config.mak "$env:REPORTS/x264-config.mak" }
+      - name: Fail-closed explicit text report staging
+        if: always()
+        id: reportstage
+        run: |
+          python -B harness/.ci-native/reports_policy.py stage "$env:REPORTS" "$env:RUNNER_TEMP/upload-reports"
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - name: Reports only independent of publication decision
+        uses: actions/upload-artifact@v4
+        if: ${{ always() && steps.reportstage.outcome == 'success' }}
+        with:
+          name: imageio-package-r3-reports-only
+          path: ${{ runner.temp }}/upload-reports
+          if-no-files-found: error
+          retention-days: 14
+      - name: Conditionally publish wheel with corresponding source
+        uses: actions/upload-artifact@v4
+        if: ${{ success() && steps.gates.outputs.publish == 'true' }}
+        with:
+          name: imageio-package-r3-wheel-and-source
+          path: ${{ env.PAYLOAD }}
+          if-no-files-found: error
+          retention-days: 14
