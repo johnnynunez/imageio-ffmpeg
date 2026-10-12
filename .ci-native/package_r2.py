@@ -65,7 +65,12 @@ def prepare():
     assert pe.FILE_HEADER.Machine == 0xAA64
     imports = sorted({x.dll.decode().lower() for attr in ('DIRECTORY_ENTRY_IMPORT','DIRECTORY_ENTRY_DELAY_IMPORT') for x in getattr(pe, attr, [])})
     # No CRT/vendor DLL copying. Every import must be a named OS component.
-    allowed = {'kernel32.dll','user32.dll','advapi32.dll','bcrypt.dll','shell32.dll','ole32.dll','gdi32.dll','secur32.dll','ws2_32.dll','psapi.dll','ntdll.dll','vfw32.dll','winmm.dll'}
+    # These three additional imports are documented Windows components:
+    # learn.microsoft.com/windows/win32/api/vfw/nf-vfw-capcreatecapturewindowa
+    # learn.microsoft.com/windows/win32/api/oleauto/nf-oleauto-variantclear
+    # learn.microsoft.com/windows/win32/api/shlwapi/nf-shlwapi-pathfindextensiona
+    # The next workflow step still requires exact System32 file witnesses.
+    allowed = {'kernel32.dll','user32.dll','advapi32.dll','bcrypt.dll','shell32.dll','ole32.dll','gdi32.dll','secur32.dll','ws2_32.dll','psapi.dll','ntdll.dll','vfw32.dll','winmm.dll','avicap32.dll','oleaut32.dll','shlwapi.dll'}
     save('runtime-imports.json', {'imports': imports, 'unclassified': sorted(set(imports)-allowed), 'exe_sha256': sha(exe), 'machine': hex(pe.FILE_HEADER.Machine), 'runtime_policy': 'Explicit -MT for x264 and FFmpeg: static MSVC CRT; no runtime DLL copied; separate rights review required.'})
     assert set(imports) <= allowed, imports
     bins = ROOT/'source/imageio_ffmpeg/binaries'
