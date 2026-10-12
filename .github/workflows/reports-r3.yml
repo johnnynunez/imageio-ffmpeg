@@ -18,6 +18,8 @@ jobs:
         with:
           python-version: '3.12'
           architecture: arm64
+      - name: Install pinned pytest for cheap cache-policy probe
+        run: python -B -m pip install pytest==9.1.1
       - name: Reject historical bytecode and stage explicit text allowlist
         env:
           GH_TOKEN: ${{ github.token }}

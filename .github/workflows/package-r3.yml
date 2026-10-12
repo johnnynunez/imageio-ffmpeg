@@ -9,6 +9,8 @@ env:
   PYTHONDONTWRITEBYTECODE: '1'
 jobs:
   package:
+    # Explicit opt-in prevents another costly rebuild while review is held.
+    if: ${{ contains(github.event.head_commit.message, '[run-native-r3]') }}
     runs-on: windows-11-arm
     timeout-minutes: 40
     defaults:
@@ -127,7 +129,7 @@ jobs:
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           Copy-Item harness/.ci-native/test_bundled_r3.py "$env:REPORTS/test_bundled_r3.py"
           Set-Location $env:REPORTS
-          & $py -I -B -m pytest test_bundled_r3.py -v -s --junitxml=bundled.xml
+          & $py -I -B -m pytest -p no:cacheprovider test_bundled_r3.py -v -s --junitxml=bundled.xml
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
       - name: Source bundle technical and rights gates
         id: gates
