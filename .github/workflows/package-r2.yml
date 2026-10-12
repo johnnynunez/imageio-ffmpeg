@@ -1,0 +1,155 @@
+name: Experimental bundled GPL Windows ARM64 r2
+on:
+  push:
+    branches: [ci/imageio-package-r2-20261012]
+permissions:
+  contents: read
+jobs:
+  package:
+    runs-on: windows-11-arm
+    timeout-minutes: 40
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: harness
+      - uses: actions/checkout@v4
+        with:
+          repository: johnnynunez/imageio-ffmpeg
+          ref: 852dff761c65517e7cb24c380391ea39cf2d27bf
+          path: source
+          fetch-depth: 0
+      - uses: actions/checkout@v4
+        with:
+          repository: FFmpeg/FFmpeg
+          ref: b08d7969c550a804a59511c7b83f2dd8cc0499b8
+          path: ffmpeg
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          architecture: arm64
+      - name: Verify immutable sources and setup isolated paths
+        run: |
+          if ((git -C ffmpeg rev-parse HEAD) -ne 'b08d7969c550a804a59511c7b83f2dd8cc0499b8') { throw 'FFmpeg SHA' }
+          if ((git -C source rev-parse HEAD) -ne '852dff761c65517e7cb24c380391ea39cf2d27bf') { throw 'wrapper SHA' }
+          New-Item -ItemType Directory -Force "$env:RUNNER_TEMP/reports", "$env:RUNNER_TEMP/payload", "$env:RUNNER_TEMP/corresponding-source", x264 | Out-Null
+          "REPORTS=$env:RUNNER_TEMP/reports" >> $env:GITHUB_ENV
+          "PAYLOAD=$env:RUNNER_TEMP/payload" >> $env:GITHUB_ENV
+          "SOURCES=$env:RUNNER_TEMP/corresponding-source" >> $env:GITHUB_ENV
+          "PIP_CACHE_DIR=$env:RUNNER_TEMP/pip-cache" >> $env:GITHUB_ENV
+          Invoke-WebRequest https://code.videolan.org/videolan/x264/-/archive/b35605ace3ddf7c1a5d67a2eb553f034aef41d55/x264-b35605ace3ddf7c1a5d67a2eb553f034aef41d55.tar.bz2 -OutFile "$env:RUNNER_TEMP/corresponding-source/x264.tar.bz2"
+          if ((Get-FileHash "$env:RUNNER_TEMP/corresponding-source/x264.tar.bz2" -Algorithm SHA256).Hash.ToLower() -ne '6eeb82934e69fd51e043bd8c5b0d152839638d1ce7aa4eea65a3fedcf83ff224') { throw 'x264 archive SHA' }
+          tar -xf "$env:RUNNER_TEMP/corresponding-source/x264.tar.bz2" -C x264 --strip-components=1
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          git -C ffmpeg archive --format=tar.gz --prefix=ffmpeg/ -o "$env:RUNNER_TEMP/corresponding-source/ffmpeg.tar.gz" HEAD
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          git -C source archive --format=tar.gz --prefix=imageio-ffmpeg/ -o "$env:RUNNER_TEMP/corresponding-source/wrapper.tar.gz" HEAD
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          git -C harness archive --format=tar.gz --prefix=build-recipe/ -o "$env:RUNNER_TEMP/corresponding-source/recipe.tar.gz" HEAD
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          python -c "import sysconfig; assert sysconfig.get_platform() == 'win-arm64'"
+          python -m pip install setuptools==80.9.0 wheel==0.45.1 pefile==2024.8.26
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: MSYS
+          update: false
+          cache: false
+          path-type: inherit
+          install: make diffutils pkgconf
+      - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: arm64
+      - name: Build exact source x264 static MSVC ARM64
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          export CC=cl
+          export CFLAGS=-MT
+          prefix="$(cygpath -m "$RUNNER_TEMP/x264-install")"
+          cd x264
+          ./configure --host=aarch64-w64-mingw32 --prefix="$prefix" --enable-static --disable-cli --disable-asm --disable-opencl
+          make -j4
+          make install
+      - name: Build GPL FFmpeg with original source pin
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          export PKG_CONFIG_PATH="$(cygpath -u "$RUNNER_TEMP/x264-install/lib/pkgconfig")"
+          cd ffmpeg
+          ./configure --toolchain=msvc --arch=aarch64 --target-os=win64 --disable-asm --disable-doc --disable-debug --disable-autodetect --disable-network --disable-shared --enable-static --disable-ffplay --disable-ffprobe --enable-gpl --enable-libx264 --pkg-config=pkgconf --extra-cflags=-MT --extra-ldflags=-verbose:lib
+          make -j4 ffmpeg.exe > "$(cygpath -u "$REPORTS")/build-link.log" 2>&1
+          ./ffmpeg.exe -version
+      - name: Capture source licenses configuration and runtime inventory
+        run: |
+          python harness/.ci-native/package_r2.py prepare
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          & dumpbin /dependents ffmpeg/ffmpeg.exe | Out-File "$env:REPORTS/dumpbin-dependents.txt"
+          & dumpbin /headers ffmpeg/ffmpeg.exe | Out-File "$env:REPORTS/dumpbin-headers.txt"
+          & dumpbin /directives ffmpeg/fftools/ffmpeg.o | Out-File "$env:REPORTS/ffmpeg-object-directives.txt"
+          & dumpbin /directives x264/common/base.o | Out-File "$env:REPORTS/x264-object-directives.txt"
+          Get-ChildItem "$env:VCToolsInstallDir/lib/arm64/*.lib" | Where-Object { $_.Name -match '^(libcmt|libvcruntime|oldnames)' } | Get-FileHash -Algorithm SHA256 | ConvertTo-Json | Out-File "$env:REPORTS/compiler-static-libraries.json"
+          $ucrt = Join-Path $env:WindowsSdkDir "Lib/$env:WindowsSDKVersion/ucrt/arm64/libucrt.lib"
+          if (Test-Path $ucrt) { Get-FileHash $ucrt | ConvertTo-Json | Out-File "$env:REPORTS/ucrt-static-library.json" }
+          $deps = Get-Content "$env:REPORTS/runtime-imports.json" -Raw | ConvertFrom-Json
+          $runtime = foreach ($name in $deps.imports) {
+            $path = Join-Path "$env:SystemRoot/System32" $name
+            if (!(Test-Path $path)) { throw "Missing system runtime $name" }
+            $sig = Get-AuthenticodeSignature $path
+            @{name=$name;path=$path;sha256=(Get-FileHash $path).Hash.ToLower();version=(Get-Item $path).VersionInfo.FileVersion;signature=$sig.Status.ToString()}
+          }
+          $runtime | ConvertTo-Json -Depth 5 | Out-File "$env:REPORTS/system-runtime-witness.json"
+      - name: Build separately locally versioned wheel
+        working-directory: source
+        run: |
+          python setup.py bdist_wheel --plat-name win_arm64 --dist-dir "$env:PAYLOAD"
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - name: Strict PE RECORD audit plus corrupted-wheel negative
+        run: |
+          $wheel = (Get-ChildItem "$env:PAYLOAD/*.whl").FullName
+          python harness/.ci-native/audit_wheel.py $wheel "$env:REPORTS/wheel-audit.json"
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          python harness/.ci-native/package_r2.py negative
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - name: Fresh native venv uses bundled exe with no override
+        run: |
+          Remove-Item Env:IMAGEIO_FFMPEG_EXE -ErrorAction SilentlyContinue
+          python -m venv "$env:RUNNER_TEMP/test-env"
+          $py = "$env:RUNNER_TEMP/test-env/Scripts/python.exe"
+          & $py -m pip install pytest==9.1.1 numpy==2.3.2 (Get-ChildItem "$env:PAYLOAD/*.whl").FullName
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          Copy-Item harness/.ci-native/test_bundled_r2.py "$env:REPORTS/test_bundled_r2.py"
+          Set-Location $env:REPORTS
+          & $py -I -m pytest test_bundled_r2.py -v -s --junitxml=bundled.xml
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - name: Source bundle technical and rights gates
+        id: gates
+        run: |
+          python harness/.ci-native/package_r2.py finalize
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - name: Preserve bounded diagnostics on failure
+        if: always()
+        run: |
+          if (Test-Path ffmpeg/ffbuild/config.log) { Copy-Item ffmpeg/ffbuild/config.log "$env:REPORTS/ffmpeg-config.log" }
+          if (Test-Path ffmpeg/ffbuild/config.mak) { Copy-Item ffmpeg/ffbuild/config.mak "$env:REPORTS/ffmpeg-config.mak" }
+          if (Test-Path x264/config.log) { Copy-Item x264/config.log "$env:REPORTS/x264-config.log" }
+          if (Test-Path x264/config.mak) { Copy-Item x264/config.mak "$env:REPORTS/x264-config.mak" }
+      - name: Reports only independent of publication decision
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: imageio-package-r2-reports-only
+          path: ${{ env.REPORTS }}
+          if-no-files-found: error
+          retention-days: 14
+      - name: Conditionally publish wheel with corresponding source
+        uses: actions/upload-artifact@v4
+        if: ${{ success() && steps.gates.outputs.publish == 'true' }}
+        with:
+          name: imageio-package-r2-wheel-and-source
+          path: ${{ env.PAYLOAD }}
+          if-no-files-found: error
+          retention-days: 14

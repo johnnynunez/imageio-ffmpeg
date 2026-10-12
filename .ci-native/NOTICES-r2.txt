@@ -1,0 +1,67 @@
+EXPERIMENTAL WINDOWS ARM64 BUILD — NOT UPSTREAM / NOT LEGALLY CLEARED
+imageio-ffmpeg 0.6.0+arm64.gpl.r2
+
+The Python wrapper source is imageio/imageio-ffmpeg-derived source at
+852dff761c65517e7cb24c380391ea39cf2d27bf. Its actual root license at that
+pin is BSD-2-Clause, reproduced in LICENSE-wrapper-BSD-2-Clause.txt.
+Do not relabel it as MIT merely because another imageio component/version
+uses MIT. Original copyright and inline notices remain in the complete
+wrapper source archive. Local packaging changes the version string only;
+the experimental ARM64 selection changes already belong to the pinned source.
+
+The bundled, separately executed FFmpeg is built from FFmpeg 7.1 commit
+b08d7969c550a804a59511c7b83f2dd8cc0499b8 with GPL components enabled:
+--enable-gpl --enable-libx264, without --enable-nonfree or any patch moving
+x264 out of FFmpeg's GPL classification. This is NOT an LGPL-only executable.
+FFmpeg's GNU GPL v2-or-later applicable license and the original LGPL/GPL
+texts, LICENSE.md, copyrights and source-specific terms are preserved.
+The x264 source is b35605ace3ddf7c1a5d67a2eb553f034aef41d55, with its GPL
+COPYING text. No alternative commercial x264 grant is asserted or needed
+as a substitute for the chosen GPL configuration.
+
+Corresponding source plan: distribute the same-run source tarball next to
+the exact wheel, on the same server, not a dead link or generic current
+source URL. It contains full pinned FFmpeg, x264 and wrapper sources,
+full build-recipe checkout, version patch, configuration files, legal
+inventory, source and binary hashes, and these instructions. Rebuild by
+running .github/workflows/package-r2.yml from the exact recipe checkout on
+the standard windows-11-arm hosted image. This is recipe/source
+correspondence, NOT a claim of deterministic bit-identical output or an
+immutable hosted compiler image. Compiler identity and static input hashes
+are captured separately. Do not separate published binary from matching
+source/notice artifacts; GitHub CI retention is temporary, not a permanent
+source-availability commitment. Rehosts must carry the matching source.
+
+MSVC and Windows runtime policy: both FFmpeg and x264 explicitly compile
+with -MT (static CRT). No MSVCP140.dll or other compiler/IDE/Redist runtime
+DLL is copied. This artifact is independent of the held opaque-vendor
+msvcp140.dll hash 7f6565a53bf892900ef225b28c922d882170c96c7278a26d83a3e4e5f5cc5c30.
+That does NOT remove Microsoft runtime obligations. Statically incorporated
+LIBCMT/libvcruntime/libucrt and header/compiler-support code have separate
+Microsoft terms. OS DLLs are supplied by Windows, not redistributed here.
+Runtime-import, system-file and linker evidence identifies what actually
+participated; it is not a permission grant. Applicable Visual Studio/SDK
+Distributable Code terms, contributor's entitlement and the GPL system-
+library treatment for this exact static linkage remain a RIGHTS HOLD.
+No private Microsoft implementation source is exported. The source bundle
+therefore does not pretend to contain source for the proprietary runtime.
+https://learn.microsoft.com/en-us/cpp/windows/redistributing-visual-cpp-files
+https://visualstudio.microsoft.com/license-terms/
+https://ffmpeg.org/legal.html
+
+Technical boundaries: native CPU default codec=None MP4/H.264 and lossless
+FFV1 are required. PNG/zlib, network, external-codec parity, assembly/SIMD
+optimization and GPU codecs are not provided/validated. No extra source
+dependency was substituted solely to make a feature count match. The
+exact native/reference feature set differences are supplied in JSON.
+The official AMD64 comparison is an emulated feature reference, never
+native acceptance. Malformed media and poisoned oracle/RECORD negatives
+are required. Only CPython 3.12 ARM64 execution is exercised; the generic
+py3 tag is not a claim that every Python release was tested.
+
+Publication policy: technical success, recovered source and copied notice
+files alone cannot approve publication. This revision hard-fails closed:
+rights_verified=false, publish=false until the exact runtime terms and
+applicable inline notices are independently reviewed. Only reports are
+uploaded. This is an experimental engineering artifact, not upstream-
+ready, a legal opinion, patent clearance, warranty, or an official release.
