@@ -67,6 +67,10 @@ jobs:
         run: |
           python -B harness/.ci-native/toolchain_r3.py
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - name: Native minimal linker flag RED GREEN
+        run: |
+          python -B harness/.ci-native/link_probe_r3.py
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
       - name: Build exact x264 with LLVM-MinGW UCRT
         shell: msys2 {0}
         run: |
@@ -89,7 +93,7 @@ jobs:
           export PKG_CONFIG_PATH="$(cygpath -u "$RUNNER_TEMP/x264-install/lib/pkgconfig")"
           unset CFLAGS CXXFLAGS LIB INCLUDE LIBPATH || true
           cd ffmpeg
-          ./configure --cc=aarch64-w64-mingw32-clang --cxx=aarch64-w64-mingw32-clang++ --ar=llvm-ar --ranlib=llvm-ranlib --nm=llvm-nm --windres=aarch64-w64-mingw32-windres --arch=aarch64 --target-os=mingw32 --disable-asm --disable-doc --disable-debug --disable-autodetect --disable-network --disable-shared --enable-static --disable-ffplay --disable-ffprobe --enable-gpl --enable-libx264 --pkg-config=pkgconf --disable-pthreads --enable-w32threads --extra-ldflags='-Wl,-Map,ffmpeg.map,--trace'
+          ./configure --cc=aarch64-w64-mingw32-clang --cxx=aarch64-w64-mingw32-clang++ --ar=llvm-ar --ranlib=llvm-ranlib --nm=llvm-nm --windres=aarch64-w64-mingw32-windres --arch=aarch64 --target-os=mingw32 --disable-asm --disable-doc --disable-debug --disable-autodetect --disable-network --disable-shared --enable-static --disable-ffplay --disable-ffprobe --enable-gpl --enable-libx264 --pkg-config=pkgconf --disable-pthreads --enable-w32threads --extra-ldflags='-Wl,-Map,ffmpeg.map,--verbose'
           make -j4 V=1 ffmpeg.exe > "$(cygpath -u "$REPORTS")/build-link.log" 2>&1
           ./ffmpeg.exe -version
       - name: Attribute actual compiled sources and selected link units
